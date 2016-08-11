@@ -127,12 +127,6 @@ public abstract class AbstractArrayBlock
     }
 
     @Override
-    public int getSizeInBytes()
-    {
-        return getValues().getSizeInBytes() + getOffsets().length() + getValueIsNull().length();
-    }
-
-    @Override
     public <T> T getObject(int position, Class<T> clazz)
     {
         if (clazz != Block.class) {
@@ -188,18 +182,6 @@ public abstract class AbstractArrayBlock
     }
 
     @Override
-    public float getFloat(int position, int offset)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public double getDouble(int position, int offset)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public Slice getSlice(int position, int offset, int length)
     {
         throw new UnsupportedOperationException();
@@ -218,7 +200,7 @@ public abstract class AbstractArrayBlock
     }
 
     @Override
-    public int hash(int position, int offset, int length)
+    public long hash(int position, int offset, int length)
     {
         throw new UnsupportedOperationException();
     }

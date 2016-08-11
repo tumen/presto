@@ -14,6 +14,7 @@
 package com.facebook.presto.sql.planner.optimizations;
 
 import com.facebook.presto.Session;
+import com.facebook.presto.SystemSessionProperties;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
@@ -30,7 +31,7 @@ import java.util.Map;
 import static java.util.Objects.requireNonNull;
 
 public class PushTableWriteThroughUnion
-        extends PlanOptimizer
+        implements PlanOptimizer
 {
     @Override
     public PlanNode optimize(PlanNode plan, Session session, Map<Symbol, Type> types, SymbolAllocator symbolAllocator, PlanNodeIdAllocator idAllocator)
@@ -40,6 +41,10 @@ public class PushTableWriteThroughUnion
         requireNonNull(types, "types is null");
         requireNonNull(symbolAllocator, "symbolAllocator is null");
         requireNonNull(idAllocator, "idAllocator is null");
+
+        if (!SystemSessionProperties.isPushTableWriteThroughUnion(session)) {
+            return plan;
+        }
 
         return SimplePlanRewriter.rewriteWith(new Rewriter(idAllocator, symbolAllocator), plan);
     }
@@ -60,6 +65,15 @@ public class PushTableWriteThroughUnion
         public PlanNode visitTableWriter(TableWriterNode node, RewriteContext<Void> context)
         {
             PlanNode sourceNode = context.rewrite(node.getSource());
+
+            if (node.getPartitioningScheme().isPresent()) {
+                // The primary incentive of this optimizer is to increase the parallelism for table
+                // write. For a table with partitioning scheme, parallelism for table writing is
+                // guaranteed regardless of this optimizer. The level of local parallelism will be
+                // determined by LocalExecutionPlanner separately, and shouldn't be a concern of
+                // this optimizer.
+                return node;
+            }
 
             // if sourceNode is not a UNION ALL, don't perform this optimization. A UNION DISTINCT would have an aggregationNode as source
             if (!(sourceNode instanceof UnionNode)) {
@@ -85,10 +99,11 @@ public class PushTableWriteThroughUnion
                         unionNode.sourceOutputLayout(i),
                         node.getColumnNames(),
                         newSymbols.build(),
-                        node.getSampleWeightSymbol()));
+                        node.getSampleWeightSymbol(),
+                        node.getPartitioningScheme()));
             }
 
-            return new UnionNode(idAllocator.getNextId(), rewrittenSources.build(), mappings.build());
+            return new UnionNode(idAllocator.getNextId(), rewrittenSources.build(), mappings.build(), ImmutableList.copyOf(mappings.build().keySet()));
         }
     }
 }

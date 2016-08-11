@@ -15,11 +15,11 @@ package com.facebook.presto.hive.metastore;
 
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.PrivilegeGrantInfo;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.weakref.jmx.Managed;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -56,23 +56,25 @@ public interface HiveMetastore
 
     void dropPartition(String databaseName, String tableName, List<String> parts);
 
-    void dropPartitionByName(String databaseName, String tableName, String partitionName);
-
     Optional<List<String>> getPartitionNames(String databaseName, String tableName);
 
     Optional<List<String>> getPartitionNamesByParts(String databaseName, String tableName, List<String> parts);
 
-    Optional<Partition> getPartition(String databaseName, String tableName, String partitionName);
+    Optional<Partition> getPartition(String databaseName, String tableName, List<String> partitionValues);
 
-    Optional<Map<String, Partition>> getPartitionsByNames(String databaseName, String tableName, List<String> partitionNames);
+    List<Partition> getPartitionsByNames(String databaseName, String tableName, List<String> partitionNames);
 
     Optional<Table> getTable(String databaseName, String tableName);
 
     Set<String> getRoles(String user);
 
-    Set<HivePrivilege> getDatabasePrivileges(String user, String databaseName);
+    Set<HivePrivilegeInfo> getDatabasePrivileges(String user, String databaseName);
 
-    Set<HivePrivilege> getTablePrivileges(String user, String databaseName, String tableName);
+    Set<HivePrivilegeInfo> getTablePrivileges(String user, String databaseName, String tableName);
+
+    void grantTablePrivileges(String databaseName, String tableName, String grantee, Set<PrivilegeGrantInfo> privilegeGrantInfoSet);
+
+    void revokeTablePrivileges(String databaseName, String tableName, String grantee, Set<PrivilegeGrantInfo> privilegeGrantInfoSet);
 
     default boolean isDatabaseOwner(String user, String databaseName)
     {

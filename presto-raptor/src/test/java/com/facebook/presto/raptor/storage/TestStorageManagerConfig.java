@@ -31,6 +31,7 @@ import static io.airlift.units.DataSize.Unit.KILOBYTE;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
 import static java.lang.Math.max;
 import static java.lang.Runtime.getRuntime;
+import static java.util.concurrent.TimeUnit.DAYS;
 import static java.util.concurrent.TimeUnit.HOURS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -51,11 +52,14 @@ public class TestStorageManagerConfig
                 .setCompactionInterval(new Duration(1, HOURS))
                 .setShardEjectorInterval(new Duration(4, HOURS))
                 .setRecoveryThreads(10)
-                .setCompactionThreads(5)
+                .setOrganizationThreads(5)
                 .setCompactionEnabled(true)
+                .setOrganizationEnabled(true)
+                .setOrganizationInterval(new Duration(7, DAYS))
                 .setMaxShardRows(1_000_000)
                 .setMaxShardSize(new DataSize(256, MEGABYTE))
-                .setMaxBufferSize(new DataSize(256, MEGABYTE)));
+                .setMaxBufferSize(new DataSize(256, MEGABYTE))
+                .setOneSplitPerBucketThreshold(0));
     }
 
     @Test
@@ -71,12 +75,15 @@ public class TestStorageManagerConfig
                 .put("storage.missing-shard-discovery-interval", "4m")
                 .put("storage.compaction-enabled", "false")
                 .put("storage.compaction-interval", "4h")
+                .put("storage.organization-enabled", "false")
+                .put("storage.organization-interval", "4h")
                 .put("storage.ejector-interval", "9h")
                 .put("storage.max-recovery-threads", "12")
-                .put("storage.max-compaction-threads", "12")
+                .put("storage.max-organization-threads", "12")
                 .put("storage.max-shard-rows", "10000")
                 .put("storage.max-shard-size", "10MB")
                 .put("storage.max-buffer-size", "512MB")
+                .put("storage.one-split-per-bucket-threshold", "4")
                 .build();
 
         StorageManagerConfig expected = new StorageManagerConfig()
@@ -89,12 +96,15 @@ public class TestStorageManagerConfig
                 .setMissingShardDiscoveryInterval(new Duration(4, MINUTES))
                 .setCompactionEnabled(false)
                 .setCompactionInterval(new Duration(4, HOURS))
+                .setOrganizationEnabled(false)
+                .setOrganizationInterval(new Duration(4, HOURS))
                 .setShardEjectorInterval(new Duration(9, HOURS))
                 .setRecoveryThreads(12)
-                .setCompactionThreads(12)
+                .setOrganizationThreads(12)
                 .setMaxShardRows(10_000)
                 .setMaxShardSize(new DataSize(10, MEGABYTE))
-                .setMaxBufferSize(new DataSize(512, MEGABYTE));
+                .setMaxBufferSize(new DataSize(512, MEGABYTE))
+                .setOneSplitPerBucketThreshold(4);
 
         assertFullMapping(properties, expected);
     }

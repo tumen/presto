@@ -17,11 +17,12 @@ import com.facebook.presto.raptor.backup.BackupModule;
 import com.facebook.presto.raptor.storage.StorageModule;
 import com.facebook.presto.raptor.util.CurrentNodeId;
 import com.facebook.presto.raptor.util.RebindSafeMBeanServer;
-import com.facebook.presto.spi.Connector;
-import com.facebook.presto.spi.ConnectorFactory;
+import com.facebook.presto.spi.ConnectorHandleResolver;
 import com.facebook.presto.spi.NodeManager;
 import com.facebook.presto.spi.PageSorter;
-import com.facebook.presto.spi.block.BlockEncodingSerde;
+import com.facebook.presto.spi.connector.Connector;
+import com.facebook.presto.spi.connector.ConnectorContext;
+import com.facebook.presto.spi.connector.ConnectorFactory;
 import com.facebook.presto.spi.type.TypeManager;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
@@ -48,7 +49,6 @@ public class RaptorConnectorFactory
     private final Map<String, Module> backupProviders;
     private final Map<String, String> optionalConfig;
     private final NodeManager nodeManager;
-    private final BlockEncodingSerde blockEncodingSerde;
     private final TypeManager typeManager;
     private final PageSorter pageSorter;
 
@@ -59,7 +59,6 @@ public class RaptorConnectorFactory
             Map<String, String> optionalConfig,
             NodeManager nodeManager,
             PageSorter pageSorter,
-            BlockEncodingSerde blockEncodingSerde,
             TypeManager typeManager)
     {
         checkArgument(!isNullOrEmpty(name), "name is null or empty");
@@ -69,7 +68,6 @@ public class RaptorConnectorFactory
         this.optionalConfig = requireNonNull(optionalConfig, "optionalConfig is null");
         this.nodeManager = requireNonNull(nodeManager, "nodeManager is null");
         this.pageSorter = requireNonNull(pageSorter, "pageSorter is null");
-        this.blockEncodingSerde = requireNonNull(blockEncodingSerde, "blockEncodingSerde is null");
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
     }
 
@@ -80,7 +78,13 @@ public class RaptorConnectorFactory
     }
 
     @Override
-    public Connector create(String connectorId, Map<String, String> config)
+    public ConnectorHandleResolver getHandleResolver()
+    {
+        return new RaptorHandleResolver();
+    }
+
+    @Override
+    public Connector create(String connectorId, Map<String, String> config, ConnectorContext context)
     {
         try {
             Bootstrap app = new Bootstrap(
@@ -94,7 +98,6 @@ public class RaptorConnectorFactory
                         binder.bind(CurrentNodeId.class).toInstance(currentNodeId);
                         binder.bind(NodeManager.class).toInstance(nodeManager);
                         binder.bind(PageSorter.class).toInstance(pageSorter);
-                        binder.bind(BlockEncodingSerde.class).toInstance(blockEncodingSerde);
                         binder.bind(TypeManager.class).toInstance(typeManager);
                     },
                     metadataModule,

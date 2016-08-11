@@ -42,8 +42,8 @@ public final class MetadataUtil
     public static void checkTableName(String catalogName, Optional<String> schemaName, Optional<String> tableName)
     {
         checkCatalogName(catalogName);
-        checkSchemaName(schemaName);
-        checkTableName(tableName);
+        schemaName.ifPresent(name -> checkLowerCase(name, "schemaName"));
+        tableName.ifPresent(name -> checkLowerCase(name, "tableName"));
 
         checkArgument(schemaName.isPresent() || !tableName.isPresent(), "tableName specified but schemaName is missing");
     }
@@ -58,24 +58,9 @@ public final class MetadataUtil
         return checkLowerCase(schemaName, "schemaName");
     }
 
-    public static Optional<String> checkSchemaName(Optional<String> schemaName)
-    {
-        return checkLowerCase(schemaName, "schemaName");
-    }
-
     public static String checkTableName(String tableName)
     {
         return checkLowerCase(tableName, "tableName");
-    }
-
-    public static Optional<String> checkTableName(Optional<String> tableName)
-    {
-        return checkLowerCase(tableName, "tableName");
-    }
-
-    public static String checkColumnName(String catalogName)
-    {
-        return checkLowerCase(catalogName, "catalogName");
     }
 
     public static void checkObjectName(String catalogName, String schemaName, String objectName)
@@ -83,14 +68,6 @@ public final class MetadataUtil
         checkLowerCase(catalogName, "catalogName");
         checkLowerCase(schemaName, "schemaName");
         checkLowerCase(objectName, "objectName");
-    }
-
-    public static Optional<String> checkLowerCase(Optional<String> value, String name)
-    {
-        if (value.isPresent()) {
-            checkLowerCase(value.get(), name);
-        }
-        return value;
     }
 
     public static String checkLowerCase(String value, String name)
@@ -121,11 +98,16 @@ public final class MetadataUtil
         List<String> parts = Lists.reverse(name.getParts());
         String objectName = parts.get(0);
         String schemaName = (parts.size() > 1) ? parts.get(1) : session.getSchema().orElseThrow(() ->
-                new SemanticException(CATALOG_NOT_SPECIFIED, node, "Catalog must be specified when session catalog is not set"));
-        String catalogName = (parts.size() > 2) ? parts.get(2) : session.getCatalog().orElseThrow(() ->
                 new SemanticException(SCHEMA_NOT_SPECIFIED, node, "Schema must be specified when session schema is not set"));
+        String catalogName = (parts.size() > 2) ? parts.get(2) : session.getCatalog().orElseThrow(() ->
+                new SemanticException(CATALOG_NOT_SPECIFIED, node, "Catalog must be specified when session catalog is not set"));
 
         return new QualifiedObjectName(catalogName, schemaName, objectName);
+    }
+
+    public static QualifiedName createQualifiedName(QualifiedObjectName name)
+    {
+        return QualifiedName.of(name.getCatalogName(), name.getSchemaName(), name.getObjectName());
     }
 
     public static boolean tableExists(Metadata metadata, Session session, String table)
@@ -181,13 +163,7 @@ public final class MetadataUtil
 
         public TableMetadataBuilder column(String columnName, Type type)
         {
-            columns.add(new ColumnMetadata(columnName, type, false));
-            return this;
-        }
-
-        public TableMetadataBuilder partitionKeyColumn(String columnName, Type type)
-        {
-            columns.add(new ColumnMetadata(columnName, type, true));
+            columns.add(new ColumnMetadata(columnName, type));
             return this;
         }
 

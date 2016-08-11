@@ -21,6 +21,7 @@ import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.TableNotFoundException;
 import com.facebook.presto.spi.type.Type;
+import com.facebook.presto.spi.type.VarcharType;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -33,6 +34,7 @@ import javax.annotation.Nullable;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.Driver;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -52,16 +54,20 @@ import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DateType.DATE;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
+import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static com.facebook.presto.spi.type.TimeType.TIME;
 import static com.facebook.presto.spi.type.TimeWithTimeZoneType.TIME_WITH_TIME_ZONE;
 import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
 import static com.facebook.presto.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE;
+import static com.facebook.presto.spi.type.TinyintType.TINYINT;
 import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
-import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
+import static com.facebook.presto.spi.type.VarcharType.createVarcharType;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.collect.Maps.fromProperties;
+import static java.lang.Math.min;
 import static java.util.Collections.nCopies;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
@@ -74,8 +80,10 @@ public class BaseJdbcClient
     private static final Map<Type, String> SQL_TYPES = ImmutableMap.<Type, String>builder()
             .put(BOOLEAN, "boolean")
             .put(BIGINT, "bigint")
+            .put(INTEGER, "integer")
+            .put(SMALLINT, "smallint")
+            .put(TINYINT, "tinyint")
             .put(DOUBLE, "double precision")
-            .put(VARCHAR, "varchar")
             .put(VARBINARY, "varbinary")
             .put(DATE, "date")
             .put(TIME, "time")
@@ -194,7 +202,7 @@ public class BaseJdbcClient
                 boolean found = false;
                 while (resultSet.next()) {
                     found = true;
-                    Type columnType = toPrestoType(resultSet.getInt("DATA_TYPE"));
+                    Type columnType = toPrestoType(resultSet.getInt("DATA_TYPE"), resultSet.getInt("COLUMN_SIZE"));
                     // skip unsupported column types
                     if (columnType != null) {
                         String columnName = resultSet.getString("COLUMN_NAME");
@@ -227,7 +235,7 @@ public class BaseJdbcClient
                 connectionUrl,
                 fromProperties(connectionProperties),
                 layoutHandle.getTupleDomain());
-        return new FixedSplitSource(connectorId, ImmutableList.of(jdbcSplit));
+        return new FixedSplitSource(ImmutableList.of(jdbcSplit));
     }
 
     @Override
@@ -246,9 +254,12 @@ public class BaseJdbcClient
     }
 
     @Override
-    public String buildSql(JdbcSplit split, List<JdbcColumnHandle> columnHandles)
+    public PreparedStatement buildSql(JdbcSplit split, List<JdbcColumnHandle> columnHandles)
+            throws SQLException
     {
         return new QueryBuilder(identifierQuote).buildSql(
+                this,
+                getConnection(split),
                 split.getCatalogName(),
                 split.getSchemaName(),
                 split.getTableName(),
@@ -308,7 +319,6 @@ public class BaseJdbcClient
                     table,
                     columnNames.build(),
                     columnTypes.build(),
-                    tableMetadata.getOwner(),
                     temporaryName,
                     connectionUrl,
                     fromProperties(connectionProperties));
@@ -351,6 +361,17 @@ public class BaseJdbcClient
     }
 
     @Override
+    public void rollbackCreateTable(JdbcOutputTableHandle handle)
+    {
+        dropTable(new JdbcTableHandle(
+                handle.getConnectorId(),
+                new SchemaTableName(handle.getSchemaName(), handle.getTemporaryTableName()),
+                handle.getCatalogName(),
+                handle.getSchemaName(),
+                handle.getTemporaryTableName()));
+    }
+
+    @Override
     public String buildInsertSql(JdbcOutputTableHandle handle)
     {
         String vars = Joiner.on(',').join(nCopies(handle.getColumnNames().size(), "?"));
@@ -369,10 +390,10 @@ public class BaseJdbcClient
     }
 
     @Override
-    public Statement getStatement(Connection connection)
+    public PreparedStatement getPreparedStatement(Connection connection, String sql)
             throws SQLException
     {
-        return connection.createStatement();
+        return connection.prepareStatement(sql);
     }
 
     protected ResultSet getTables(Connection connection, String schemaName, String tableName)
@@ -384,7 +405,7 @@ public class BaseJdbcClient
                 connection.getCatalog(),
                 escapeNamePattern(schemaName, escape),
                 escapeNamePattern(tableName, escape),
-                new String[] {"TABLE"});
+                new String[] {"TABLE", "VIEW"});
     }
 
     protected SchemaTableName getSchemaTableName(ResultSet resultSet)
@@ -404,7 +425,7 @@ public class BaseJdbcClient
         }
     }
 
-    protected Type toPrestoType(int jdbcType)
+    protected Type toPrestoType(int jdbcType, int columnSize)
     {
         switch (jdbcType) {
             case Types.BIT:
@@ -413,6 +434,7 @@ public class BaseJdbcClient
             case Types.TINYINT:
             case Types.SMALLINT:
             case Types.INTEGER:
+                return INTEGER;
             case Types.BIGINT:
                 return BIGINT;
             case Types.FLOAT:
@@ -427,7 +449,7 @@ public class BaseJdbcClient
             case Types.NVARCHAR:
             case Types.LONGVARCHAR:
             case Types.LONGNVARCHAR:
-                return VARCHAR;
+                return createVarcharType(min(columnSize, VarcharType.MAX_LENGTH));
             case Types.BINARY:
             case Types.VARBINARY:
             case Types.LONGVARBINARY:
@@ -444,11 +466,18 @@ public class BaseJdbcClient
 
     protected String toSqlType(Type type)
     {
+        if (type instanceof VarcharType) {
+            if (((VarcharType) type).getLength() == VarcharType.MAX_LENGTH) {
+                return "varchar";
+            }
+            return "varchar(" + ((VarcharType) type).getLength() + ")";
+        }
+
         String sqlType = SQL_TYPES.get(type);
         if (sqlType != null) {
             return sqlType;
         }
-        throw new PrestoException(NOT_SUPPORTED, "Unsuported column type: " + type.getTypeSignature());
+        throw new PrestoException(NOT_SUPPORTED, "Unsupported column type: " + type.getTypeSignature());
     }
 
     protected String quoted(String name)

@@ -79,6 +79,20 @@ public class TestRedisDistributedHash
     }
 
     @Override
+    public void testCompatibleTypeChangeForView()
+            throws Exception
+    {
+        // Redis connector currently does not support views
+    }
+
+    @Override
+    public void testCompatibleTypeChangeForView2()
+            throws Exception
+    {
+        // Redis connector currently does not support views
+    }
+
+    @Override
     public void testViewMetadata()
     {
     }
@@ -139,6 +153,18 @@ public class TestRedisDistributedHash
 
     @Override
     public void testShowColumns()
+    {
+    }
+
+    @Override
+    public void testGroupingSetMixedExpressionAndColumn()
+            throws Exception
+    {
+    }
+
+    @Override
+    public void testGroupingSetMixedExpressionAndOrdinal()
+            throws Exception
     {
     }
 

@@ -13,8 +13,10 @@
  */
 package com.facebook.presto.example;
 
-import com.facebook.presto.spi.Connector;
-import com.facebook.presto.spi.ConnectorFactory;
+import com.facebook.presto.spi.ConnectorHandleResolver;
+import com.facebook.presto.spi.connector.Connector;
+import com.facebook.presto.spi.connector.ConnectorContext;
+import com.facebook.presto.spi.connector.ConnectorFactory;
 import com.facebook.presto.spi.type.TypeManager;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
@@ -45,11 +47,15 @@ public class ExampleConnectorFactory
     }
 
     @Override
-    public Connector create(final String connectorId, Map<String, String> requiredConfig)
+    public ConnectorHandleResolver getHandleResolver()
+    {
+        return new ExampleHandleResolver();
+    }
+
+    @Override
+    public Connector create(final String connectorId, Map<String, String> requiredConfig, ConnectorContext context)
     {
         requireNonNull(requiredConfig, "requiredConfig is null");
-        requireNonNull(optionalConfig, "optionalConfig is null");
-
         try {
             // A plugin is not required to use Guice; it is just very convenient
             Bootstrap app = new Bootstrap(

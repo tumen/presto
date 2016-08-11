@@ -13,10 +13,12 @@
  */
 package com.facebook.presto.kafka;
 
-import com.facebook.presto.spi.Connector;
-import com.facebook.presto.spi.ConnectorFactory;
+import com.facebook.presto.spi.ConnectorHandleResolver;
 import com.facebook.presto.spi.NodeManager;
 import com.facebook.presto.spi.SchemaTableName;
+import com.facebook.presto.spi.connector.Connector;
+import com.facebook.presto.spi.connector.ConnectorContext;
+import com.facebook.presto.spi.connector.ConnectorFactory;
 import com.facebook.presto.spi.type.TypeManager;
 import com.google.common.base.Throwables;
 import com.google.inject.Injector;
@@ -60,7 +62,13 @@ public class KafkaConnectorFactory
     }
 
     @Override
-    public Connector create(String connectorId, Map<String, String> config)
+    public ConnectorHandleResolver getHandleResolver()
+    {
+        return new KafkaHandleResolver();
+    }
+
+    @Override
+    public Connector create(String connectorId, Map<String, String> config, ConnectorContext context)
     {
         requireNonNull(connectorId, "connectorId is null");
         requireNonNull(config, "config is null");

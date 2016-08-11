@@ -14,14 +14,25 @@
 package com.facebook.presto.plugin.postgresql;
 
 import com.facebook.presto.tests.AbstractTestQueries;
+import com.facebook.presto.tests.datatype.CreateAndInsertDataSetup;
+import com.facebook.presto.tests.datatype.CreateAsSelectDataSetup;
+import com.facebook.presto.tests.datatype.DataSetup;
+import com.facebook.presto.tests.datatype.DataTypeTest;
+import com.facebook.presto.tests.sql.JdbcSqlExecutor;
+import com.facebook.presto.tests.sql.PrestoSqlExecutor;
 import io.airlift.testing.postgresql.TestingPostgreSqlServer;
 import io.airlift.tpch.TpchTable;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
 import java.io.IOException;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 
 import static com.facebook.presto.plugin.postgresql.PostgreSqlQueryRunner.createPostgreSqlQueryRunner;
+import static com.facebook.presto.tests.datatype.DataType.varcharDataType;
 import static io.airlift.testing.Closeables.closeAllRuntimeException;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
@@ -61,5 +72,86 @@ public class TestPostgreSqlDistributedQueries
 
         assertUpdate("DROP TABLE test_drop");
         assertFalse(queryRunner.tableExists(getSession(), "test_drop"));
+    }
+
+    @Test
+    public void testViews()
+            throws Exception
+    {
+        execute("CREATE OR REPLACE VIEW tpch.test_view AS SELECT * FROM tpch.orders");
+
+        assertQuery("SELECT orderkey FROM test_view", "SELECT orderkey FROM orders");
+
+        execute("DROP VIEW IF EXISTS tpch.test_view");
+    }
+
+    @Test
+    public void testPrestoCreatedParameterizedVarchar()
+            throws Exception
+    {
+        varcharDataTypeTest().execute(queryRunner, prestoCreateAsSelect("presto_test_parameterized_varchar"));
+    }
+
+    @Test
+    public void testPostgreSqlCreatedParameterizedVarchar()
+            throws Exception
+    {
+        varcharDataTypeTest().execute(queryRunner, postgresCreateAndInsert("tpch.postgresql_test_parameterized_varchar"));
+    }
+
+    private DataTypeTest varcharDataTypeTest()
+    {
+        return DataTypeTest.create()
+                .addRoundTrip(varcharDataType(10), "text_a")
+                .addRoundTrip(varcharDataType(255), "text_b")
+                .addRoundTrip(varcharDataType(65535), "text_d")
+                .addRoundTrip(varcharDataType(10485760), "text_f")
+                .addRoundTrip(varcharDataType(), "unbounded");
+    }
+
+    @Test
+    public void testPrestoCreatedParameterizedVarcharUnicode()
+            throws Exception
+    {
+        unicodeVarcharDateTypeTest().execute(queryRunner, prestoCreateAsSelect("postgresql_test_parameterized_varchar_unicode"));
+    }
+
+    @Test
+    public void testPostgreSqlCreatedParameterizedVarcharUnicode()
+            throws Exception
+    {
+        unicodeVarcharDateTypeTest().execute(queryRunner, postgresCreateAndInsert("tpch.postgresql_test_parameterized_varchar_unicode"));
+    }
+
+    private DataTypeTest unicodeVarcharDateTypeTest()
+    {
+        String sampleUnicodeText = "\u653b\u6bbb\u6a5f\u52d5\u968a";
+        String sampleFourByteUnicodeCharacter = "\uD83D\uDE02";
+
+        return DataTypeTest.create()
+                .addRoundTrip(varcharDataType(sampleUnicodeText.length()), sampleUnicodeText)
+                .addRoundTrip(varcharDataType(32), sampleUnicodeText)
+                .addRoundTrip(varcharDataType(20000), sampleUnicodeText)
+                .addRoundTrip(varcharDataType(), sampleUnicodeText)
+                .addRoundTrip(varcharDataType(1), sampleFourByteUnicodeCharacter);
+    }
+
+    private DataSetup prestoCreateAsSelect(String tableNamePrefix)
+    {
+        return new CreateAsSelectDataSetup(new PrestoSqlExecutor(queryRunner), tableNamePrefix);
+    }
+
+    private DataSetup postgresCreateAndInsert(String tableNamePrefix)
+    {
+        return new CreateAndInsertDataSetup(new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl()), tableNamePrefix);
+    }
+
+    private void execute(String sql)
+            throws SQLException
+    {
+        try (Connection connection = DriverManager.getConnection(postgreSqlServer.getJdbcUrl());
+                Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        }
     }
 }

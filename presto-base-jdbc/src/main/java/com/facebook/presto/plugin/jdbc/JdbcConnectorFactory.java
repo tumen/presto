@@ -13,9 +13,11 @@
  */
 package com.facebook.presto.plugin.jdbc;
 
-import com.facebook.presto.spi.Connector;
-import com.facebook.presto.spi.ConnectorFactory;
+import com.facebook.presto.spi.ConnectorHandleResolver;
 import com.facebook.presto.spi.classloader.ThreadContextClassLoader;
+import com.facebook.presto.spi.connector.Connector;
+import com.facebook.presto.spi.connector.ConnectorContext;
+import com.facebook.presto.spi.connector.ConnectorFactory;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Injector;
@@ -52,7 +54,13 @@ public class JdbcConnectorFactory
     }
 
     @Override
-    public Connector create(String connectorId, Map<String, String> requiredConfig)
+    public ConnectorHandleResolver getHandleResolver()
+    {
+        return new JdbcHandleResolver();
+    }
+
+    @Override
+    public Connector create(String connectorId, Map<String, String> requiredConfig, ConnectorContext context)
     {
         requireNonNull(requiredConfig, "requiredConfig is null");
         requireNonNull(optionalConfig, "optionalConfig is null");

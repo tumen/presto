@@ -21,6 +21,8 @@ import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
 import com.facebook.presto.spi.type.AbstractType;
 import com.facebook.presto.spi.type.Type;
+import com.facebook.presto.spi.type.TypeSignature;
+import com.facebook.presto.spi.type.TypeSignatureParameter;
 import com.google.common.collect.ImmutableList;
 import io.airlift.slice.Slice;
 
@@ -28,8 +30,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static com.facebook.presto.spi.type.StandardTypes.ARRAY;
 import static com.facebook.presto.type.TypeUtils.checkElementNotNull;
-import static com.facebook.presto.type.TypeUtils.parameterizedTypeName;
 import static java.util.Objects.requireNonNull;
 
 public class ArrayType
@@ -40,7 +42,7 @@ public class ArrayType
 
     public ArrayType(Type elementType)
     {
-        super(parameterizedTypeName("array", elementType.getTypeSignature()), Block.class);
+        super(new TypeSignature(ARRAY, TypeSignatureParameter.of(elementType.getTypeSignature())), Block.class);
         this.elementType = requireNonNull(elementType, "elementType is null");
     }
 
@@ -83,7 +85,7 @@ public class ArrayType
     }
 
     @Override
-    public int hash(Block block, int position)
+    public long hash(Block block, int position)
     {
         Block array = getObject(block, position);
         int hash = 0;
@@ -204,6 +206,6 @@ public class ArrayType
     @Override
     public String getDisplayName()
     {
-        return "array<" + elementType.getDisplayName() + ">";
+        return ARRAY + "(" + elementType.getDisplayName() + ")";
     }
 }

@@ -13,17 +13,17 @@
  */
 package com.facebook.presto.hive;
 
+import com.facebook.presto.hive.metastore.Partition;
+import com.facebook.presto.hive.metastore.Table;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.Table;
 
 import java.util.Optional;
 
 public interface LocationService
 {
-    LocationHandle forNewTable(String queryId, String schemaName, String tableName);
+    LocationHandle forNewTable(String user, String queryId, String schemaName, String tableName);
 
-    LocationHandle forExistingTable(String queryId, Table table);
+    LocationHandle forExistingTable(String user, String queryId, Table table);
 
     /**
      * Target path for the specified existing partition.

@@ -28,13 +28,14 @@ import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
 import com.facebook.presto.spi.block.LazyBlock;
 import com.facebook.presto.spi.block.LazyBlockLoader;
+import com.facebook.presto.spi.type.DecimalType;
 import com.facebook.presto.spi.type.FixedWidthType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import io.airlift.slice.Slice;
-import io.airlift.slice.Slices;
+import org.apache.hadoop.fs.Path;
 import org.joda.time.DateTimeZone;
 
 import java.io.IOException;
@@ -47,21 +48,30 @@ import static com.facebook.presto.hive.HiveUtil.bigintPartitionKey;
 import static com.facebook.presto.hive.HiveUtil.booleanPartitionKey;
 import static com.facebook.presto.hive.HiveUtil.datePartitionKey;
 import static com.facebook.presto.hive.HiveUtil.doublePartitionKey;
+import static com.facebook.presto.hive.HiveUtil.getPrefilledColumnValue;
+import static com.facebook.presto.hive.HiveUtil.integerPartitionKey;
+import static com.facebook.presto.hive.HiveUtil.longDecimalPartitionKey;
+import static com.facebook.presto.hive.HiveUtil.shortDecimalPartitionKey;
+import static com.facebook.presto.hive.HiveUtil.smallintPartitionKey;
 import static com.facebook.presto.hive.HiveUtil.timestampPartitionKey;
+import static com.facebook.presto.hive.HiveUtil.tinyintPartitionKey;
+import static com.facebook.presto.hive.HiveUtil.varcharPartitionKey;
 import static com.facebook.presto.orc.OrcReader.MAX_BATCH_SIZE;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DateType.DATE;
+import static com.facebook.presto.spi.type.Decimals.isLongDecimal;
+import static com.facebook.presto.spi.type.Decimals.isShortDecimal;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
+import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
-import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
+import static com.facebook.presto.spi.type.TinyintType.TINYINT;
+import static com.facebook.presto.spi.type.Varchars.isVarcharType;
 import static com.google.common.base.MoreObjects.toStringHelper;
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Maps.uniqueIndex;
-import static java.lang.Math.max;
-import static java.lang.Math.min;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
@@ -79,8 +89,6 @@ public class OrcPageSource
     private final Block[] constantBlocks;
     private final int[] hiveColumnIndexes;
 
-    private long completedBytes;
-
     private int batchId;
     private boolean closed;
 
@@ -93,8 +101,10 @@ public class OrcPageSource
             List<HiveColumnHandle> columns,
             DateTimeZone hiveStorageTimeZone,
             TypeManager typeManager,
-            AggregatedMemoryContext systemMemoryContext)
+            AggregatedMemoryContext systemMemoryContext,
+            Path path)
     {
+        requireNonNull(path, "path is null");
         this.recordReader = requireNonNull(recordReader, "recordReader is null");
         this.orcDataSource = requireNonNull(orcDataSource, "orcDataSource is null");
 
@@ -118,11 +128,11 @@ public class OrcPageSource
 
             hiveColumnIndexes[columnIndex] = column.getHiveColumnIndex();
 
-            if (column.isPartitionKey()) {
+            if (column.isPartitionKey() || column.isHidden()) {
                 HivePartitionKey partitionKey = partitionKeysByName.get(name);
-                checkArgument(partitionKey != null, "No value provided for partition key %s", name);
 
-                byte[] bytes = partitionKey.getValue().getBytes(UTF_8);
+                String columnValue = getPrefilledColumnValue(column, partitionKey, path);
+                byte[] bytes = columnValue.getBytes(UTF_8);
 
                 BlockBuilder blockBuilder;
                 if (type instanceof FixedWidthType) {
@@ -138,43 +148,73 @@ public class OrcPageSource
                     }
                 }
                 else if (type.equals(BOOLEAN)) {
-                    boolean value = booleanPartitionKey(partitionKey.getValue(), name);
+                    boolean value = booleanPartitionKey(columnValue, name);
                     for (int i = 0; i < MAX_BATCH_SIZE; i++) {
                         BOOLEAN.writeBoolean(blockBuilder, value);
                     }
                 }
                 else if (type.equals(BIGINT)) {
-                    long value = bigintPartitionKey(partitionKey.getValue(), name);
+                    long value = bigintPartitionKey(columnValue, name);
                     for (int i = 0; i < MAX_BATCH_SIZE; i++) {
                         BIGINT.writeLong(blockBuilder, value);
                     }
                 }
+                else if (type.equals(INTEGER)) {
+                    long value = integerPartitionKey(columnValue, name);
+                    for (int i = 0; i < MAX_BATCH_SIZE; i++) {
+                        INTEGER.writeLong(blockBuilder, value);
+                    }
+                }
+                else if (type.equals(SMALLINT)) {
+                    long value = smallintPartitionKey(columnValue, name);
+                    for (int i = 0; i < MAX_BATCH_SIZE; i++) {
+                        SMALLINT.writeLong(blockBuilder, value);
+                    }
+                }
+                else if (type.equals(TINYINT)) {
+                    long value = tinyintPartitionKey(columnValue, name);
+                    for (int i = 0; i < MAX_BATCH_SIZE; i++) {
+                        TINYINT.writeLong(blockBuilder, value);
+                    }
+                }
                 else if (type.equals(DOUBLE)) {
-                    double value = doublePartitionKey(partitionKey.getValue(), name);
+                    double value = doublePartitionKey(columnValue, name);
                     for (int i = 0; i < MAX_BATCH_SIZE; i++) {
                         DOUBLE.writeDouble(blockBuilder, value);
                     }
                 }
-                else if (type.equals(VARCHAR)) {
-                    Slice value = Slices.wrappedBuffer(bytes);
+                else if (isVarcharType(type)) {
+                    Slice value = varcharPartitionKey(columnValue, name, type);
                     for (int i = 0; i < MAX_BATCH_SIZE; i++) {
-                        VARCHAR.writeSlice(blockBuilder, value);
+                        type.writeSlice(blockBuilder, value);
                     }
                 }
                 else if (type.equals(DATE)) {
-                    long value = datePartitionKey(partitionKey.getValue(), name);
+                    long value = datePartitionKey(columnValue, name);
                     for (int i = 0; i < MAX_BATCH_SIZE; i++) {
                         DATE.writeLong(blockBuilder, value);
                     }
                 }
                 else if (type.equals(TIMESTAMP)) {
-                    long value = timestampPartitionKey(partitionKey.getValue(), hiveStorageTimeZone, name);
+                    long value = timestampPartitionKey(columnValue, hiveStorageTimeZone, name);
                     for (int i = 0; i < MAX_BATCH_SIZE; i++) {
                         TIMESTAMP.writeLong(blockBuilder, value);
                     }
                 }
+                else if (isShortDecimal(type)) {
+                    long value = shortDecimalPartitionKey(columnValue, (DecimalType) type, name);
+                    for (int i = 0; i < MAX_BATCH_SIZE; i++) {
+                        type.writeLong(blockBuilder, value);
+                    }
+                }
+                else if (isLongDecimal(type)) {
+                    Slice value = longDecimalPartitionKey(columnValue, (DecimalType) type, name);
+                    for (int i = 0; i < MAX_BATCH_SIZE; i++) {
+                        type.writeSlice(blockBuilder, value);
+                    }
+                }
                 else {
-                    throw new PrestoException(NOT_SUPPORTED, format("Unsupported column type %s for partition key: %s", type.getDisplayName(), name));
+                    throw new PrestoException(NOT_SUPPORTED, format("Unsupported column type %s for prefilled column: %s", type.getDisplayName(), name));
                 }
 
                 constantBlocks[columnIndex] = blockBuilder.build();
@@ -202,7 +242,7 @@ public class OrcPageSource
     @Override
     public long getCompletedBytes()
     {
-        return completedBytes;
+        return orcDataSource.getReadBytes();
     }
 
     @Override
@@ -238,12 +278,7 @@ public class OrcPageSource
                     blocks[fieldId] = new LazyBlock(batchSize, new OrcBlockLoader(hiveColumnIndexes[fieldId], type));
                 }
             }
-            Page page = new Page(batchSize, blocks);
-
-            long newCompletedBytes = (long) (recordReader.getSplitLength() * recordReader.getProgress());
-            completedBytes = min(recordReader.getSplitLength(), max(completedBytes, newCompletedBytes));
-
-            return page;
+            return new Page(batchSize, blocks);
         }
         catch (PrestoException e) {
             closeWithSuppression(e);
@@ -294,7 +329,10 @@ public class OrcPageSource
             close();
         }
         catch (RuntimeException e) {
-            throwable.addSuppressed(e);
+            // Self-suppression not permitted
+            if (throwable != e) {
+                throwable.addSuppressed(e);
+            }
         }
     }
 

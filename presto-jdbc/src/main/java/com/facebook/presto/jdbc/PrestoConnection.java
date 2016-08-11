@@ -16,6 +16,7 @@ package com.facebook.presto.jdbc;
 import com.facebook.presto.client.ClientSession;
 import com.facebook.presto.client.ServerInfo;
 import com.facebook.presto.client.StatementClient;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.net.HostAndPort;
@@ -72,6 +73,7 @@ public class PrestoConnection
     private final String user;
     private final Map<String, String> clientInfo = new ConcurrentHashMap<>();
     private final Map<String, String> sessionProperties = new ConcurrentHashMap<>();
+    private final AtomicReference<String> transactionId = new AtomicReference<>();
     private final QueryExecutor queryExecutor;
 
     PrestoConnection(URI uri, String user, QueryExecutor queryExecutor)
@@ -570,12 +572,12 @@ public class PrestoConnection
 
     ServerInfo getServerInfo()
     {
-        return queryExecutor.getServerInfo(createHttpUri(address));
+        return queryExecutor.getServerInfo(getHttpUri());
     }
 
     StatementClient startQuery(String sql)
     {
-        URI uri = createHttpUri(address);
+        URI uri = getHttpUri();
 
         String source = firstNonNull(clientInfo.get("ApplicationName"), "presto-jdbc");
 
@@ -588,6 +590,7 @@ public class PrestoConnection
                 timeZoneId.get(),
                 locale.get(),
                 ImmutableMap.copyOf(sessionProperties),
+                transactionId.get(),
                 false,
                 new Duration(2, MINUTES));
 
@@ -640,10 +643,16 @@ public class PrestoConnection
         }
     }
 
+    @VisibleForTesting
+    URI getHttpUri()
+    {
+        return createHttpUri(address);
+    }
+
     private static URI createHttpUri(HostAndPort address)
     {
         return uriBuilder()
-                .scheme("http")
+                .scheme((address.getPort() == 443) ? "https" : "http")
                 .host(address.getHostText())
                 .port(address.getPort())
                 .build();

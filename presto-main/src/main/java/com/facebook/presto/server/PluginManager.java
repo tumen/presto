@@ -15,22 +15,20 @@ package com.facebook.presto.server;
 
 import com.facebook.presto.block.BlockEncodingManager;
 import com.facebook.presto.connector.ConnectorManager;
-import com.facebook.presto.metadata.FunctionFactory;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.security.AccessControlManager;
-import com.facebook.presto.spi.ConnectorFactory;
 import com.facebook.presto.spi.Plugin;
 import com.facebook.presto.spi.block.BlockEncodingFactory;
 import com.facebook.presto.spi.classloader.ThreadContextClassLoader;
+import com.facebook.presto.spi.connector.ConnectorFactory;
+import com.facebook.presto.spi.connector.ConnectorFactoryContext;
 import com.facebook.presto.spi.security.SystemAccessControlFactory;
+import com.facebook.presto.spi.type.ParametricType;
 import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.type.ParametricType;
 import com.facebook.presto.type.TypeRegistry;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
-import com.google.inject.Injector;
 import io.airlift.configuration.ConfigurationFactory;
 import io.airlift.http.server.HttpServerInfo;
 import io.airlift.log.Logger;
@@ -56,6 +54,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.facebook.presto.metadata.FunctionExtractor.extractFunctions;
 import static com.facebook.presto.server.PluginDiscovery.discoverPlugins;
 import static com.facebook.presto.server.PluginDiscovery.writePluginServices;
 import static java.util.Objects.requireNonNull;
@@ -78,12 +77,12 @@ public class PluginManager
 
     private static final Logger log = Logger.get(PluginManager.class);
 
-    private final Injector injector;
     private final ConnectorManager connectorManager;
     private final Metadata metadata;
     private final AccessControlManager accessControlManager;
     private final BlockEncodingManager blockEncodingManager;
     private final TypeRegistry typeRegistry;
+    private final ConnectorFactoryContext connectorFactoryContext;
     private final ArtifactResolver resolver;
     private final File installedPluginsDir;
     private final List<String> plugins;
@@ -92,7 +91,7 @@ public class PluginManager
     private final AtomicBoolean pluginsLoaded = new AtomicBoolean();
 
     @Inject
-    public PluginManager(Injector injector,
+    public PluginManager(
             NodeInfo nodeInfo,
             HttpServerInfo httpServerInfo,
             PluginManagerConfig config,
@@ -101,15 +100,14 @@ public class PluginManager
             Metadata metadata,
             AccessControlManager accessControlManager,
             BlockEncodingManager blockEncodingManager,
-            TypeRegistry typeRegistry)
+            TypeRegistry typeRegistry,
+            ConnectorFactoryContext connectorFactoryContext)
     {
-        requireNonNull(injector, "injector is null");
         requireNonNull(nodeInfo, "nodeInfo is null");
         requireNonNull(httpServerInfo, "httpServerInfo is null");
         requireNonNull(config, "config is null");
         requireNonNull(configurationFactory, "configurationFactory is null");
 
-        this.injector = injector;
         installedPluginsDir = config.getInstalledPluginsDir();
         if (config.getPlugins() == null) {
             this.plugins = ImmutableList.of();
@@ -130,6 +128,7 @@ public class PluginManager
         this.accessControlManager = requireNonNull(accessControlManager, "accessControlManager is null");
         this.blockEncodingManager = requireNonNull(blockEncodingManager, "blockEncodingManager is null");
         this.typeRegistry = requireNonNull(typeRegistry, "typeRegistry is null");
+        this.connectorFactoryContext = requireNonNull(connectorFactoryContext, "connectorFactoryContext is null");
     }
 
     public boolean arePluginsLoaded()
@@ -188,36 +187,39 @@ public class PluginManager
 
     public void installPlugin(Plugin plugin)
     {
-        injector.injectMembers(plugin);
-
         plugin.setOptionalConfig(optionalConfig);
 
-        for (BlockEncodingFactory<?> blockEncodingFactory : plugin.getServices(BlockEncodingFactory.class)) {
+        for (BlockEncodingFactory<?> blockEncodingFactory : plugin.getBlockEncodingFactories(blockEncodingManager)) {
             log.info("Registering block encoding %s", blockEncodingFactory.getName());
             blockEncodingManager.addBlockEncodingFactory(blockEncodingFactory);
         }
 
-        for (Type type : plugin.getServices(Type.class)) {
+        for (Type type : plugin.getTypes()) {
             log.info("Registering type %s", type.getTypeSignature());
             typeRegistry.addType(type);
         }
 
-        for (ParametricType parametricType : plugin.getServices(ParametricType.class)) {
+        for (ParametricType parametricType : plugin.getParametricTypes()) {
             log.info("Registering parametric type %s", parametricType.getName());
             typeRegistry.addParametricType(parametricType);
         }
 
-        for (ConnectorFactory connectorFactory : plugin.getServices(ConnectorFactory.class)) {
+        for (com.facebook.presto.spi.ConnectorFactory connectorFactory : plugin.getLegacyConnectorFactories(connectorFactoryContext)) {
+            log.info("Registering legacy connector %s", connectorFactory.getName());
+            connectorManager.addConnectorFactory(connectorFactory);
+        }
+
+        for (ConnectorFactory connectorFactory : plugin.getConnectorFactories(connectorFactoryContext)) {
             log.info("Registering connector %s", connectorFactory.getName());
             connectorManager.addConnectorFactory(connectorFactory);
         }
 
-        for (FunctionFactory functionFactory : plugin.getServices(FunctionFactory.class)) {
-            log.info("Registering functions from %s", functionFactory.getClass().getName());
-            metadata.addFunctions(functionFactory.listFunctions());
+        for (Class<?> functionClass : plugin.getFunctions()) {
+            log.info("Registering functions from %s", functionClass.getName());
+            metadata.addFunctions(extractFunctions(functionClass));
         }
 
-        for (SystemAccessControlFactory accessControlFactory : plugin.getServices(SystemAccessControlFactory.class)) {
+        for (SystemAccessControlFactory accessControlFactory : plugin.getSystemAccessControlFactories()) {
             log.info("Registering system access control %s", accessControlFactory.getName());
             accessControlManager.addSystemAccessControlFactory(accessControlFactory);
         }
@@ -307,7 +309,7 @@ public class PluginManager
 
     private static List<Artifact> sortedArtifacts(List<Artifact> artifacts)
     {
-        List<Artifact> list = Lists.newArrayList(artifacts);
+        List<Artifact> list = new ArrayList<>(artifacts);
         Collections.sort(list, Ordering.natural().nullsLast().onResultOf(Artifact::getFile));
         return list;
     }
